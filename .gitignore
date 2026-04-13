@@ -1,0 +1,26 @@
+# Python 编译文件
+__pycache__/
+*.py[cod]
+*.pyd
+.env
+
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 你的 RAG 项目专属（必须忽略）
+chroma_db/
+chat_history/
+data/
+*.db
+*.sqlite
+
+# 系统文件
+.DS_Store
+Thumbs.db
