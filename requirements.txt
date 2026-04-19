@@ -3,7 +3,10 @@ langchain>=0.1.10
 langchain-core>=0.1.28
 langchain-community>=0.0.24
 langchain-chroma>=0.1.0
-chromadb>=0.4.22
+# 关键修改：锁定 chromadb 到兼容版本
+chromadb==0.4.18
 dashscope>=1.14.0
 python-dotenv>=1.0.1
 requests>=2.31.0
+# 关键修改：强制指定 protobuf 版本，解决兼容性问题
+protobuf==3.20.3
