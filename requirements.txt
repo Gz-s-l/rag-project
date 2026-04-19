@@ -3,7 +3,11 @@ langchain>=0.1.10
 langchain-core>=0.1.28
 langchain-community>=0.0.24
 langchain-chroma>=0.1.0
-chromadb>=0.4.22
+# 锁定到兼容 NumPy 1.x 的 chromadb 版本
+chromadb==0.4.18
 dashscope>=1.14.0
 python-dotenv>=1.0.1
 requests>=2.31.0
+# 关键：强制使用 NumPy 1.x 版本，避免 2.0 兼容性问题
+numpy<2.0
+protobuf==3.20.3
