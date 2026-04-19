@@ -11,14 +11,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessagesPlaceholder
 from langchain_community.chat_models.tongyi import ChatTongyi
 
-
-def print_prompt(prompt):
-    print("="*20)
-    print(prompt.to_string())
-    print("="*20)
-    return prompt
-# 中间结果展示
-
 class RagService(object):
 
     def __init__(self):
@@ -64,7 +56,7 @@ class RagService(object):
                 "input": RunnablePassthrough(),
                 "context": RunnableLambda(format_for_retriever)|retriever | format_document
             }
-            |RunnableLambda(format_for_prompt_template)| self.prompt_template | print_prompt | self.chat_model | StrOutputParser()
+            |RunnableLambda(format_for_prompt_template)| self.prompt_template | self.chat_model | StrOutputParser()
         )
         
         conversation_chain =RunnableWithMessageHistory(
