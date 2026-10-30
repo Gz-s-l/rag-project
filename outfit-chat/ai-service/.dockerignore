@@ -1,0 +1,35 @@
+# Python 字节码
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 本地虚拟环境：体积很大（实测 venv 有 466MB），依赖在镜像里由 pip 重新安装
+.venv/
+venv/
+venv*/
+*venv/
+*venv*/
+.venv*/
+
+# 环境变量（密钥不能进镜像，由 docker-compose 注入）
+.env
+
+# 运行期产生的会话历史不进镜像（对话记录由 SpringBoot+MySQL 持久化，这里只是模型上下文缓存）
+chat_history/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+
+# 运行期产物不进镜像：
+#   chroma_db/  —— 向量库在容器首次启动时由 corpus/ 自动构建，不带本地调试数据
+#   md5.txt     —— 与向量库同生共死的去重记录，必须和向量库一起重建
+#   kb_state.json —— 构建状态缓存
+# 这样本地构建和服务器构建出来的镜像行为完全一致，不会出现"本地库 17 条、线上库 0 条"的错位。
+chroma_db/
+md5.txt
+kb_state.json
+
+# 说明：corpus/ 必须保留在镜像内 —— 它是知识库的唯一数据源，
+# 容器启动时由 kb_bootstrap.py 自动增量入库（约 10~20 秒）。

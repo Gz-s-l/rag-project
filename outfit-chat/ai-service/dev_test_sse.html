@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <title>模块一 · FastAPI SSE 本地调试页</title>
+    <style>
+        /* 仅用于本地验证模块一的流式效果，不是正式前端（正式前端在模块四用 Vue3 实现） */
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; }
+        h2 { font-size: 18px; }
+        .row { display: flex; gap: 8px; margin-bottom: 12px; }
+        input, button { padding: 8px 10px; font-size: 14px; }
+        input { flex: 1; }
+        #out { border: 1px solid #ddd; border-radius: 6px; padding: 12px; min-height: 160px; white-space: pre-wrap; line-height: 1.7; }
+        #log { font-size: 12px; color: #888; margin-top: 8px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
+    </style>
+</head>
+<body>
+<h2>模块一 · FastAPI 流式对话调试</h2>
+<p style="color:#666;font-size:13px">
+    直接连 FastAPI 的 GET 版 SSE 接口（浏览器 EventSource 不支持 POST）。用于在 SpringBoot 未就绪时验证流式效果。
+</p>
+
+<div class="row">
+    <input id="sid" value="dev_001" placeholder="sessionId" style="max-width:160px" />
+    <input id="q" value="我身高178体重150斤，应该穿什么尺码？" placeholder="问题" />
+    <button id="send">发送</button>
+    <button id="clear">清空上下文</button>
+</div>
+<div id="out"></div>
+<div id="log"></div>
+
+<script>
+    const BASE = "http://127.0.0.1:8000";   // 换成你实际启动的 FastAPI 地址+端口
+    const out = document.getElementById("out");
+    const log = document.getElementById("log");
+    let es = null;
+
+    document.getElementById("send").onclick = () => {
+        if (es) { es.close(); }
+        const sid = document.getElementById("sid").value.trim();
+        const q = document.getElementById("q").value.trim();
+        if (!sid || !q) { alert("sessionId 和问题都不能为空"); return; }
+
+        out.textContent = "";
+        log.textContent = "";
+
+        const url = `${BASE}/api/chat/stream?sessionId=${encodeURIComponent(sid)}&question=${encodeURIComponent(q)}`;
+        es = new EventSource(url);
+
+        // 注意：后端每一帧都是 `data: {JSON}`，所以这里拿到的是 JSON 字符串，需要自己 parse
+        es.onmessage = (evt) => {
+            const frame = JSON.parse(evt.data);
+            log.textContent += evt.data + "\n";
+            if (frame.type === "delta") {
+                out.textContent += frame.content;
+            } else if (frame.type === "done") {
+                es.close(); es = null;
+                out.textContent = frame.content;
+                log.textContent += `\n[done] 片段数=${frame.deltaCount}\n`;
+            } else if (frame.type === "error") {
+                es.close(); es = null;
+                out.textContent += `\n[错误] ${frame.message}`;
+            }
+        };
+        es.onerror = () => {
+            // 流正常结束时浏览器也会触发 onerror（因为服务端关闭了连接），此处只提示
+            if (es) { log.textContent += "[连接关闭]\n"; es.close(); es = null; }
+        };
+    };
+
+    document.getElementById("clear").onclick = async () => {
+        const sid = document.getElementById("sid").value.trim();
+        const r = await fetch(`${BASE}/api/chat/history/${encodeURIComponent(sid)}`, { method: "DELETE" });
+        log.textContent = "清空结果：" + JSON.stringify(await r.json());
+        out.textContent = "";
+    };
+</script>
+</body>
+</html>

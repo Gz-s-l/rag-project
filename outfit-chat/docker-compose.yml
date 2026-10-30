@@ -1,0 +1,174 @@
+# =====================================================================
+# 平价穿搭 AI 顾问 · 一键部署编排
+#
+# 拓扑（本地开发 / 内网验证）：
+#   浏览器 → frontend(nginx:80) → backend(SpringBoot:8080) → ai-service(FastAPI:8000)
+#                                        ↓
+#                                    mysql(8.0:3306)
+#
+# 拓扑（公网 + 域名 HTTPS，加 --profile https）：
+#   浏览器 → caddy(80/443，自动证书) → frontend(nginx:80) → backend → ai-service
+#
+# 使用：
+#   1) 复制 .env.example 为 .env，填入 DASHSCOPE_API_KEY 和 MySQL 密码
+#   2) 仅 IP 访问：       docker compose up -d --build   → http://服务器IP:8081
+#      域名 + HTTPS：    .env 设 DOMAIN 后
+#                        docker compose --profile https up -d --build → https://你的域名
+#   3) 详细步骤见 DEPLOY.md（已有服务器）/ DEPLOY_CLOUD.md（从买服务器开始）
+#
+# 说明：
+#   * 默认只暴露 frontend 的 WEB_PORT（8081），backend / ai-service / mysql 仅在内部网络，
+#     更安全，也避免和本机已占用的 8000/8080/3306 冲突；
+#   * caddy 属于可选 profile，不启用时 80/443 不被占用，不会和你服务器上已有的 nginx 抢端口；
+#   * 数据持久化：mysql_data（聊天记录）、ai_data（向量库 + 会话记忆 + KB 状态）、
+#     caddy_data（TLS 证书，务必保留，否则每次重建都要重新申请，容易触发 Let's Encrypt 限流）。
+# =====================================================================
+
+services:
+  # ---------------------------------------------------------------
+  # MySQL：聊天记录持久化
+  # ---------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: outfit-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: outfit_chat
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 首次启动（数据卷为空时）自动执行建库建表
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - outfit-net
+
+  # ---------------------------------------------------------------
+  # FastAPI AI 服务：RAG 检索 + 大模型 + SSE 流式输出
+  # ---------------------------------------------------------------
+  ai-service:
+    build:
+      context: ./ai-service
+      args:
+        # 国内构建建议在 .env 里设为 https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    image: outfit-ai-service:1.0.0
+    container_name: outfit-ai
+    restart: unless-stopped
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      # 当前阿里云百炼账号下 qwen3-max 不可用，实测 qwen-max 正常
+      CHAT_MODEL_NAME: ${CHAT_MODEL_NAME:-qwen-max}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-text-embedding-v4}
+      TOP_K: ${TOP_K:-4}
+      # 启动自动补齐知识库（corpus 语料增量入库 + 过期联网采集）
+      KB_AUTO_BOOTSTRAP: ${KB_AUTO_BOOTSTRAP:-true}
+      WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
+      RAG_DATA_DIR: /app/data
+      TZ: Asia/Shanghai
+    volumes:
+      - ai_data:/app/data
+    networks:
+      - outfit-net
+
+  # ---------------------------------------------------------------
+  # SpringBoot 主后端：SSE 转发 + 聊天记录落库
+  # ---------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    image: outfit-backend:1.0.0
+    container_name: outfit-backend
+    restart: unless-stopped
+    environment:
+      AI_BASE_URL: http://ai-service:8000
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DB: outfit_chat
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+    networks:
+      - outfit-net
+
+  # ---------------------------------------------------------------
+  # 前端：nginx 托管 Vue 静态资源 + 反代 /api（SSE 专用参数已配）
+  # ---------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+    image: outfit-frontend:1.0.0
+    container_name: outfit-frontend
+    restart: unless-stopped
+    ports:
+      # 宿主端口可用 .env 的 WEB_PORT 改；容器内固定 80
+      - "${WEB_PORT:-8081}:80"
+    depends_on:
+      backend:
+        # 等后端健康检查通过再起 nginx，避免用户首次打开页面吃到 502
+        condition: service_healthy
+    networks:
+      - outfit-net
+
+  # ---------------------------------------------------------------
+  # Caddy：对外 HTTPS 入口（可选，profile=https 时才启动）
+  #
+  # 为什么用 profile 而不是默认启动：
+  #   ① 首次上线通常先用 IP:8081 验证链路，此时不需要域名和证书；
+  #   ② 服务器上若已有 nginx/宝塔占用 80、443，不启用 profile 就不会冲突。
+  #
+  # 启用：docker compose --profile https up -d
+  # ---------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: outfit-caddy
+    restart: unless-stopped
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"      # HTTP/3，支持则自动启用
+    environment:
+      # 域名写在这里由 Caddyfile 的 {$DOMAIN} 读取
+      DOMAIN: ${DOMAIN}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书与账户信息：必须持久化，删了会重新申请并可能触发 Let's Encrypt 限流
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    networks:
+      - outfit-net
+
+networks:
+  outfit-net:
+    driver: bridge
+
+volumes:
+  # MySQL 数据（聊天记录）
+  mysql_data:
+  # AI 服务数据：chroma 向量库 + chat_history 会话记忆 + md5 去重记录 + kb_state.json
+  # 首次启动会由启动钩子自动从镜像内 corpus/ 建库（约 10~20 秒）
+  ai_data:
+  # Caddy 的 TLS 证书与配置（启用 https profile 后产生）
+  caddy_data:
+  caddy_config:

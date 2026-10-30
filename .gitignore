@@ -4,10 +4,13 @@ __pycache__/
 *.pyd
 .env
 
-# 虚拟环境
+# 虚拟环境（注意：本项目历史上出现过 `激活环境venv`、`venv#` 这类畸形目录名，
+# 后两条通配规则专门兜住它们，避免几百个第三方包被提交进仓库）
 venv/
 env/
 .venv/
+*venv*/
+*venv#
 
 # IDE
 .idea/
@@ -22,4 +25,23 @@ data/
 
 # 系统文件
 .DS_Store
-Thumbs.dbmd5.txt
+Thumbs.db
+
+# AI 助手的工作记录（不属于项目代码）
+.workbuddy/
+
+# 知识库去重记录（与向量库同生共死，随部署重建，不入库）
+md5.txt
+
+# 依赖与构建产物（服务器上重新构建，不要提交）
+# 用不带前缀的目录名，任意层级都能命中（前端/后端都在 outfit-chat/ 下）
+node_modules/
+dist/
+target/
+tools/
+
+# AI 服务运行时生成物（corpus/ 才是知识库源，向量库到服务器首次启动自动重建）
+# 根目录的 chroma_db/ 属于原 Streamlit 单机版，仍需提交，所以这里只排新架构那份
+outfit-chat/ai-service/chroma_db/
+outfit-chat/ai-service/kb_state.json
+

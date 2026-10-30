@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>模块二测试 · SpringBoot SSE 转发</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  .row { margin: 10px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 120px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  button { padding: 8px 18px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  button:disabled { background: #9db7f0; cursor: not-allowed; }
+  .gray { background: #6b7280; }
+  #out { white-space: pre-wrap; background: #f5f5f5; border: 1px solid #e5e5e5; border-radius: 8px;
+         padding: 14px; min-height: 120px; margin-top: 14px; line-height: 1.7; }
+  .log { color: #888; font-size: 12px; }
+  .err { color: #dc2626; }
+</style>
+</head>
+<body>
+<h1>模块二测试 · 走 SpringBoot(8080) 的流式对话</h1>
+<div>
+  链路：本页 → <b>GET http://127.0.0.1:8080/api/chat/stream</b> → SpringBoot WebClient → FastAPI(8000) → 大模型<br>
+  <span class="log">每条提问和回答都会由 SpringBoot 落到 MySQL 的 chat_message 表，可去库里核对。</span>
+</div>
+<div class="row">
+  <input id="base" value="http://127.0.0.1:8080" title="SpringBoot 地址" style="flex:0 0 200px">
+  <input id="sid" value="spring_t1" title="sessionId">
+  <input id="uid" value="1001" title="userId" style="flex:0 0 90px">
+</div>
+<div class="row">
+  <input id="q" placeholder="输入问题，如：我163，沙漏型身材，黄皮，约会怎么穿？">
+  <button id="send" onclick="send()">发送</button>
+  <button class="gray" onclick="stop()">停止</button>
+  <button class="gray" onclick="clearHistory()">清空该会话历史</button>
+  <button class="gray" onclick="loadHistory()">查 MySQL 历史</button>
+</div>
+<div id="out"></div>
+
+<script>
+  var es = null;
+  function log(t, cls) {
+    var d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = t;
+    out.appendChild(d);
+    out.scrollTop = out.scrollHeight;
+  }
+  function send() {
+    stop();
+    out.textContent = '';
+    var base = document.getElementById('base').value.replace(/\/$/, '');
+    var sid = document.getElementById('sid').value.trim();
+    var uid = document.getElementById('uid').value.trim();
+    var q = document.getElementById('q').value.trim();
+    if (!q) { log('请输入问题', 'err'); return; }
+    // EventSource 只支持 GET，与前端模块四对接方式一致
+    var url = base + '/api/chat/stream?sessionId=' + encodeURIComponent(sid)
+            + '&question=' + encodeURIComponent(q) + '&userId=' + encodeURIComponent(uid);
+    log('>> ' + url, 'log');
+    es = new EventSource(url);
+    es.onmessage = function (e) {
+      var frame; try { frame = JSON.parse(e.data); } catch (_) { log(e.data); return; }
+      if (frame.type === 'meta') log('[meta] sessionId=' + frame.sessionId, 'log');
+      else if (frame.type === 'delta') { out.append(frame.content); out.scrollTop = out.scrollHeight; }
+      else if (frame.type === 'done') { log('\n[done] 共 ' + frame.deltaCount + ' 帧，已落库', 'log'); stop(); }
+      else if (frame.type === 'error') { log('\n[error] ' + frame.message, 'err'); stop(); }
+    };
+    es.onerror = function () { log('[连接关闭]', 'log'); stop(); };
+    document.getElementById('send').disabled = true;
+  }
+  function stop() {
+    if (es) { es.close(); es = null; }
+    document.getElementById('send').disabled = false;
+  }
+  function loadHistory() {
+    var base = document.getElementById('base').value.replace(/\/$/, '');
+    var sid = document.getElementById('sid').value.trim();
+    fetch(base + '/api/chat/history/' + encodeURIComponent(sid))
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        out.textContent = '';
+        if (r.code !== 0) { log('查询失败：' + r.message, 'err'); return; }
+        log('MySQL 中共 ' + r.data.length + ' 条记录：', 'log');
+        r.data.forEach(function (m) {
+          log('[' + m.role + '] ' + m.content);
+        });
+      });
+  }
+  function clearHistory() {
+    var base = document.getElementById('base').value.replace(/\/$/, '');
+    var sid = document.getElementById('sid').value.trim();
+    fetch(base + '/api/chat/history/' + encodeURIComponent(sid), { method: 'DELETE' })
+      .then(function (r) { return r.json(); })
+      .then(function (r) { out.textContent = ''; log('已删除 ' + r.data.deleted + ' 条 MySQL 记录（同时已通知 FastAPI 清上下文）', 'log'); });
+  }
+</script>
+</body>
+</html>
