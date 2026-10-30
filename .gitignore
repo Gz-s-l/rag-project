@@ -34,14 +34,8 @@ Thumbs.db
 md5.txt
 
 # 依赖与构建产物（服务器上重新构建，不要提交）
-# 用不带前缀的目录名，任意层级都能命中（前端/后端都在 outfit-chat/ 下）
 node_modules/
 dist/
 target/
 tools/
-
-# AI 服务运行时生成物（corpus/ 才是知识库源，向量库到服务器首次启动自动重建）
-# 根目录的 chroma_db/ 属于原 Streamlit 单机版，仍需提交，所以这里只排新架构那份
-outfit-chat/ai-service/chroma_db/
-outfit-chat/ai-service/kb_state.json
 
